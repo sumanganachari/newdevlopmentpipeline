@@ -1,0 +1,208 @@
+name: $(Build.BuildId)
+
+parameters:
+  - name: deployType
+    displayName: "Deployment Type(Only for Testing Packages)"
+    type: string
+    default: ecr
+    values:
+      - git
+      - ecr
+
+  - name: environment
+    displayName: "Environment to Deploy"
+    type: string
+    default: dev5
+    values:
+    - china
+    - japan-test
+    - japan-clients
+
+  - name: branch
+    displayName: "Branch to Deploy"
+    type: string
+    default: main
+
+  - name: rollbackVersion
+    displayName: "Rollback to Previous Version"
+    type: string
+    default: latest
+    values:
+      - latest
+      - previous
+
+resources:
+  repositories:
+    - repository: CICDTemplates
+      type: git
+      name: CICDTemplates/CICDTemplates
+ pipelines:
+  - pipeline: Turing_DEV_autolabelling_BE_build
+    source: Turing_DEV_autolabelling_BE_build_pipeline
+    trigger: none
+  - pipeline: Turing_DEV_autolabelling_FE_build
+    source: Turing_DEV_autolabelling_FE_build_pipeline
+    trigger: none
+  - pipeline: Turing_DEV_datamanagement_BE_build
+    source: Turing_DEV_datamanagement_BE_build_pipeline
+    trigger: none
+  - pipeline: Turing_DEV_datamanagement_FE_build
+    source: Turing_DEV_datamanagement_FE_build_pipeline
+    trigger: none
+  - pipeline: Turing_DEV_doc_config_BE_build
+    source: Turing_DEV_doc_config_BE_build_pipeline
+    trigger: none
+  - pipeline: Turing_DEV_doc_config_FE_build
+    source: Turing_DEV_doc_config_FE_build_pipeline
+    trigger: none
+  - pipeline: Turing_DEV_lexicon_BE_build
+    source: Turing_DEV_lexicon_BE_build_pipeline
+    trigger: none
+  - pipeline: Turing_DEV_lexicon_FE_build
+    source: Turing_DEV_lexicon_FE_build_pipeline
+    trigger: none
+  # - pipeline: Turing_DEV_microsoft-tool_build
+  #   source: Turing_DEV_microsoft-tool_build_pipeline
+  #   trigger: none
+  - pipeline: Turing_DEV_nginx_build
+    source: Turing_DEV_nginx_build_pipeline
+    trigger: none
+  - pipeline: Turing_DEV_notification_build
+    source: Turing_DEV_notification_build_pipeline
+    trigger: none
+  - pipeline: Turing_DEV_orchestrator_BE_build
+    source: Turing_DEV_orchestrator_BE_build_pipeline
+    trigger: none
+  - pipeline: Turing_DEV_orchestrator_FE_build
+    source: Turing_DEV_orchestrator_FE_build_pipeline
+    trigger: none
+  - pipeline: Turing_DEV_tesseract-predictor_build
+    source: Turing_DEV_tesseract-predictor_build_pipeline
+    trigger: none
+  - pipeline: Quasar_DEV_orchestrator_BE_build
+    source: Quasar_DEV_orchestrator_BE_build_pipeline
+    trigger: none 
+
+variables:
+  Workspace: $(Build.SourcesDirectory)/repo
+  BUILD_NUMBER: $(Build.BuildId)
+  type: ${{ parameters.deployType }}
+
+stages:
+  - stage: DevPipeline
+    jobs:
+    - job: Deploy
+      displayName: 'Deploy'
+      dependsOn: []
+      pool:
+        name: aws-ssh-ec2
+        demands:
+          - agent.name -equals Jenkins_Slave1
+      steps:
+ 	# Need to clean the Workspace on the slave before you can download new.
+      - task: DeleteFiles@1
+        inputs:
+          SourceFolder: '$(Workspace)'
+          Contents: '**'
+          RemoveSourceFolder: true
+          RemoveDotFiles: true
+
+      - template: CommonTemplates/keyvault.yml@CICDTemplates
+        parameters:
+          SecretsFilter: 'innersourceUsername, innersourceToken'
+      - bash: |
+          cd $(Workspace)
+          rm -rf *
+          if [ "$(type)" == "git" ]; then
+            git clone --branch=release/1.0.0/quasar_plus_plus https://$(innersourceUsername):$(innersourceToken)@innersource.accenture.com/scm/ap_poc/aaam_aus_post_ansible.git
+          elif [ "$(type)" == "ecr" ]; then
+            # Fetch the previous ECR image version if selected
+            if [ "$(rollbackVersion)" == "previous" ]; then
+              # Fetch the previous ECR image version (implement ECR rollback logic)
+              # ...
+            fi
+          fi
+          cd aaam_aus_post_ansible
+          echo "******************************branch and commit details******************************************"
+          git log -1 --name-status
+          echo "**************************************************************************************************"
+          pwd
+          ansible-playbook common/dev-legacy-dev-deployment.yml \
+	  displayName: 'Clone Repository and Deploy'
+          --extra-vars "HOME_DIR=/opt/docker \
+          REPO_URL=https://$(innersourceUsername):$(innersourceToken)@innersource.accenture.com/scm/a1220/aaam-genai-backend.git \
+          REPO_BRANCH=${{ parameters.branch }}
+          BUILD_ID=$(BUILD_NUMBER)" \
+          -i inventory --limit ${{ parameters.environment }}
+        condition: eq(variables.type, 'git')
+       # Get Code from Innersource using CICDTemplate. Change the parameters based on project repo and branch.
+       # $(resources.pipeline.Turing_DEV_orchestrator_FE_build.runID) 
+      - template: CommonTemplates/cloneRepo.yml@CICDTemplates
+
+        parameters:
+          gitUrl: https://innersource.accenture.com/scm/ap_poc/aaam_aus_post_ansible.git
+          gitBranch: release/1.0.0/quasar_plus_plus
+          downloadDirectory: $(Workspace)
+
+      # Your additional steps for deployment or image creation
+      - script: |
+          cd $(Workspace)
+          pwd
+          ansible-playbook common/dev-playbook.yml \
+          --extra-vars "FRONTEND_VERSION=1.1.$(resources.pipeline.Turing_DEV_orchestrator_FE_build.runID) \
+          BACKEND_VERSION=1.1.$(resources.pipeline.Turing_DEV_orchestrator_BE_build.runID) \
+          MLCORE_VERSION=1.1.1 \
+          NGINX_VERSION=1.1.$(resources.pipeline.Turing_DEV_nginx_build.runID) \
+          MTURK_VERSION=1.1.$(resources.pipeline.Turing_DEV_autolabelling_BE_build.runID) \
+          MTURK_CLIENT_VERSION=1.1.$(resources.pipeline.Turing_DEV_autolabelling_FE_build.runID) \
+          ENTITY_RECOGNITION_VERSION=1.1.1 \
+          DATA_MANAGEMENT_VERSION=1.1.$(resources.pipeline.Turing_DEV_datamanagement_BE_build.runID) \
+          DATA_MANAGEMENT_CLIENT_VERSION=1.1.$(resources.pipeline.Turing_DEV_datamanagement_FE_build.runID) \
+          DOCUMENT_CONFIG_VERSION=1.1.$(resources.pipeline.Turing_DEV_doc_config_BE_build.runID) \
+          DOCUMENT_CONFIG_CLIENT_VERSION=1.1.$(resources.pipeline.Turing_DEV_doc_config_FE_build.runID) \
+          LEXICON_VERSION=1.1.$(resources.pipeline.Turing_DEV_lexicon_BE_build.runID) \
+          LEXICON_CLIENT_VERSION=1.1.$(resources.pipeline.Turing_DEV_lexicon_FE_build.runID) \
+          TESSERACT_WORKER_VERSION=1.1.$(resources.pipeline.Turing_DEV_tesseract-predictor_build.runID) \
+          TURING_NOTIFICATION_VERSION=1.1.$(resources.pipeline.Turing_DEV_notification_build.runID) \
+          SERVER_ENV=_dev2 \
+          multiPage=true \
+          mongodbPassword=AUSTRALIA-post2018 \
+          ELASTICSEARCH_USERNAME=elastic \
+          ELASTIC_PASSWORD=AUSTRALIA-post#2018 \
+          tesseractWorkerCount=4 \
+          OAUTH_CLIENT_ID=turing-admin \
+          OAUTH_CLIENT_SECRET=Cdjdj@#ffkjf1Fd3BH4De8# \
+          OAUTH_IM_DEFAULT_ADMIN_USER=admin \
+          OAUTH_IM_DEFAULT_ADMIN_PWD=(p!E}6ZddLmG4:@6 \
+          ATR_MONGO_NAME=atr \
+          ATR_MONGO_PASSWORD=12345678 \
+          INSTALL_DIR=/opt \
+          TOKENBASE=true \
+          MICROSOFT_KEY=59f496501cc34091bbc0918d354c247c \
+          MICROSOFT_RECOGNIZER_KEY=9a52fca2774a4debb30724b4cc8327c3 \
+          INITIAL_TURING_USER_PASSWORD=$2a$10$bTnSDKswZzwx.sHWzP8DYOnVtyPbBIwCAcVieItQ1NS1dal9TeYG \
+          DEV_USERNAME_MANAGEMENT=admin1 \
+          DEV_PASSWORD_MANAGEMENT=AUSTRALIA-post#20181 \
+          COGNITIVE_SERVICES_ENDPOINT=https://australiaeast.api.cognitive.microsoft.com/ \
+          OAUTH_AVAILABLE=false \
+          GCP_BUCKET=nprod-mywizard-lema-reuben_lema-reuben \
+          GCP_PROJECT=acn-mywiz-aiops-gcp-non-prod \
+          GCP_INVOICE_PROCESSOR=1bc2ca1b6f3fbe31 \
+          GCP_REGION=us \
+          DATA_PRESENT_MODEL_ID=5ef16a3bda6b160010589563 \
+          TZ=Australia/Sydney \
+          GENAI_BACKEND_VERSION=1.1.28330 \
+          GENAI_BACKEND_CONCURRENCY=10 \
+          OPENAI_API_TYPE=azure \
+          OPENAI_API_VERSION=2023-03-15-preview \
+          OPENAI_DEPLOYMENT=text-embedding-ada-002 \
+          OPENAI_ENGINE=text-embedding-ada-002 \
+          OPENAI_MODEL=text-embedding-ada-002 \
+          OPENAI_MODEL_ENGINE=gpt-35-turbo-16k \
+          QUASAR_PLUS_PLUS_ONLY=True" \
+          -i inventory --limit ${{ parameters.environment }}
+        condition: eq(variables.type, 'ecr')  
+        displayName: Deploy
+
+      # Always call this template at the end of the stage if you have used CloneRepo template at the start of the stage. It notifies Innersource of the build status.
+      - template: CommonTemplates/buildNotifier.yml@CICDTemplates

@@ -99,15 +99,31 @@ stages:
         demands:
           - agent.name -equals Jenkins_Slave1
       steps:
- 	# Need to clean the Workspace on the slave before you can download new.
-      - task: DeleteFiles@1
-        inputs:
-          SourceFolder: '$(Workspace)'
-          Contents: '**'
-          RemoveSourceFolder: true
-          RemoveDotFiles: true
+        # Need to clean the Workspace on the slave before you can download new.
+        - task: DeleteFiles@1
+          inputs:
+            SourceFolder: '$(Workspace)'
+            Contents: '**'
+            RemoveSourceFolder: true
+            RemoveDotFiles: true
 
-      - template: CommonTemplates/keyvault.yml@CICDTemplates
+        - template: CommonTemplates/keyvault.yml@CICDTemplates
+          parameters:
+            SecretsFilter: 'innersourceUsername, innersourceToken'
+
+        - bash: |
+            cd $(Workspace)
+            rm -rf *
+            # ... rest of the bash script ...
+
+        - condition: eq(variables.type, 'git')
+          displayName: 'Clone Repository and Deploy'
+
+        - template: CommonTemplates/cloneRepo.yml@CICDTemplates
+          parameters:
+            gitUrl: https://innersource.accenture.com/scm/ap_poc/aaam_aus_post_ansible.git
+            gitBranch: release/1.0.0/quasar_plus_plus
+            downloadDirectory: $(Workspace)
         parameters:
           SecretsFilter: 'innersourceUsername, innersourceToken'
       - bash: |

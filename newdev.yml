@@ -144,12 +144,12 @@ stages:
           echo "**************************************************************************************************"
           pwd
           ansible-playbook common/dev-legacy-dev-deployment.yml \
-	  displayName: 'Clone Repository and Deploy'
-          --extra-vars "HOME_DIR=/opt/docker \
-          REPO_URL=https://$(innersourceUsername):$(innersourceToken)@innersource.accenture.com/scm/a1220/aaam-genai-backend.git \
-          REPO_BRANCH=${{ parameters.branch }}
-          BUILD_ID=$(BUILD_NUMBER)" \
-          -i inventory --limit ${{ parameters.environment }}
+            --extra-vars "HOME_DIR=/opt/docker \
+            REPO_URL=https://$(innersourceUsername):$(innersourceToken)@innersource.accenture.com/scm/a1220/aaam-genai-backend.git \
+            REPO_BRANCH=${{ parameters.branch }} \
+            BUILD_ID=$(BUILD_NUMBER)" \
+            -i inventory --limit ${{ parameters.environment }}
+          displayName: 'Clone Repository and Deploy'
         condition: eq(variables.type, 'git')
        # Get Code from Innersource using CICDTemplate. Change the parameters based on project repo and branch.
        # $(resources.pipeline.Turing_DEV_orchestrator_FE_build.runID) 
